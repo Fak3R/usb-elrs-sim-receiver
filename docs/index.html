@@ -271,6 +271,65 @@
       font-size: 14px;
     }
 
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, .72);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+      z-index: 1000;
+    }
+
+    .modal-backdrop.hidden {
+      display: none;
+    }
+
+    .modal {
+      width: min(820px, 100%);
+      max-height: 90vh;
+      overflow: auto;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 20px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, .45);
+    }
+
+    .modal h2 {
+      margin-bottom: 10px;
+    }
+
+    .modal ol {
+      color: var(--muted);
+      line-height: 1.55;
+    }
+
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 18px;
+    }
+
+    .modal-table-wrap {
+      overflow: auto;
+      margin-top: 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+    }
+
+    .modal-table-wrap table {
+      min-width: 760px;
+    }
+
+    .modal-note-strong {
+      color: var(--text);
+      font-weight: 700;
+    }
+
     @media (max-width: 980px) {
       .layout {
         grid-template-columns: 1fr;
@@ -293,10 +352,8 @@
 
   <div class="card">
     <div class="row">
-      <button id="connectSerial">Connect configuration</button>
-      <button id="connectGamepad" class="secondary">Connect joystick</button>
+      <button id="connectSerial">Connect Radio</button>
       <span id="serialStatus" class="status">Serial not connected</span>
-      <span id="gamepadStatus" class="status">Joystick optional</span>
       <span id="signalStatus" class="status">CRSF unknown</span>
       <span id="sourceStatus" class="status">Source: none</span>
     </div>
@@ -319,14 +376,13 @@
       <div class="card">
         <h2>Calibration</h2>
         <p class="note">
-          To capture center, keep roll, pitch, and yaw centered and set throttle to 50%.
-          Then start travel calibration and move all sticks to their full minimum and maximum positions.
+          First capture the stick center. Then start travel calibration and move all sticks to their full minimum and maximum positions.
+          The stop button appears inside the travel calibration window.
         </p>
 
         <div class="row">
           <button class="secondary" id="center">1. Capture center</button>
           <button class="warn" id="calStart">2. Start travel calibration</button>
-          <button class="secondary" id="calStop">3. Stop travel calibration</button>
           <button class="ok" id="save">Save</button>
           <button class="danger" id="defaults">Defaults</button>
         </div>
@@ -387,6 +443,14 @@
     </div>
   </div>
 
+  <div id="modalBackdrop" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal">
+      <h2 id="modalTitle"></h2>
+      <div id="modalBody"></div>
+      <div id="modalActions" class="modal-actions"></div>
+    </div>
+  </div>
+
   <script>
     const axisNames = [
       "Axis 1", "Axis 2", "Axis 3", "Axis 4",
@@ -399,7 +463,6 @@
     let serialBuffer = "";
     let config = null;
     let latestData = null;
-    let selectedGamepadIndex = null;
     let lastSerialDataMs = 0;
 
     const el = id => document.getElementById(id);
@@ -559,66 +622,8 @@
           updateButton(i, (d.buttons & (1 << i)) !== 0);
         }
       }
-    }
 
-    function pollGamepad() {
-      const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-      let gp = null;
-
-      if (selectedGamepadIndex !== null) {
-        gp = pads[selectedGamepadIndex];
-      }
-
-      if (!gp) {
-        for (const p of pads) {
-          if (p) {
-            gp = p;
-            selectedGamepadIndex = p.index;
-            break;
-          }
-        }
-      }
-
-      if (!gp) {
-        if (performance.now() - lastSerialDataMs > 1000) {
-          setStatus("gamepadStatus", "Joystick not detected");
-        }
-        requestAnimationFrame(pollGamepad);
-        return;
-      }
-
-      setStatus("gamepadStatus", `${gp.id}`, "ok");
-
-      /*
-        Serial DATA has priority.
-        If no recent Serial data is received, the Gamepad API is used as fallback.
-      */
-      const serialIsRecent = performance.now() - lastSerialDataMs < 300;
-
-      if (!serialIsRecent) {
-        setStatus("sourceStatus", "Source: Gamepad API", "warn");
-
-        for (let i = 0; i < 8; i++) {
-          updateAxisBar(i, gp.axes[i] ?? 0);
-        }
-
-        for (let i = 0; i < 16; i++) {
-          const active = gp.buttons[i] && gp.buttons[i].pressed;
-          updateButton(i, active);
-        }
-      }
-
-      requestAnimationFrame(pollGamepad);
-    }
-
-    async function connectGamepad() {
-      if (!navigator.getGamepads) {
-        alert("This browser does not support the Gamepad API.");
-        return;
-      }
-
-      log("Gamepad API enabled. Move a stick or press a button if the joystick does not appear.");
-      pollGamepad();
+      updateModalLiveValues();
     }
 
     async function connectSerial() {
@@ -635,6 +640,7 @@
         reader = port.readable.getReader();
 
         setStatus("serialStatus", "Serial connected", "ok");
+        setStatus("sourceStatus", "Source: waiting for DATA", "warn");
         log("Serial connected.");
 
         readLoop();
@@ -714,12 +720,14 @@
     async function send(cmd) {
       if (!writer) {
         alert("Connect configuration first.");
-        return;
+        return false;
       }
 
       const encoder = new TextEncoder();
       await writer.write(encoder.encode(cmd + "\n"));
       log("> " + cmd);
+
+      return true;
     }
 
     function applyConfigToUi() {
@@ -751,6 +759,8 @@
           el(`btnPos${i}`).value = b.enabled ? b.position : "OFF";
         });
       }
+
+      updateModalLiveValues();
     }
 
     async function applyButtons() {
@@ -778,16 +788,260 @@
       await send("CFG GET");
     }
 
-    window.addEventListener("gamepadconnected", e => {
-      selectedGamepadIndex = e.gamepad.index;
-      setStatus("gamepadStatus", `${e.gamepad.id}`, "ok");
-      log("Joystick connected: " + e.gamepad.id);
+    function openModal(title, bodyHtml, actions = []) {
+      el("modalTitle").textContent = title;
+      el("modalBody").innerHTML = bodyHtml;
+
+      const actionsBox = el("modalActions");
+      actionsBox.innerHTML = "";
+
+      actions.forEach(action => {
+        const btn = document.createElement("button");
+        btn.textContent = action.label;
+
+        if (action.className) {
+          btn.className = action.className;
+        }
+
+        btn.onclick = action.onClick || closeModal;
+        actionsBox.appendChild(btn);
+      });
+
+      el("modalBackdrop").classList.remove("hidden");
+      updateModalLiveValues();
+    }
+
+    function closeModal() {
+      el("modalBackdrop").classList.add("hidden");
+    }
+
+    function axisLiveTableHtml() {
+      let rows = "";
+
+      for (let i = 0; i < 8; i++) {
+        rows += `
+          <tr>
+            <td>Axis ${i + 1}</td>
+            <td id="modalAxisSrc${i}">-</td>
+            <td id="modalRaw${i}">-</td>
+            <td id="modalHid${i}">-</td>
+            <td id="modalMin${i}">-</td>
+            <td id="modalMid${i}">-</td>
+            <td id="modalMax${i}">-</td>
+            <td id="modalInv${i}">-</td>
+            <td id="modalDb${i}">-</td>
+          </tr>
+        `;
+      }
+
+      return `
+        <div class="modal-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Axis</th>
+                <th>CH</th>
+                <th>Raw</th>
+                <th>HID</th>
+                <th>Min</th>
+                <th>Mid</th>
+                <th>Max</th>
+                <th>Inv</th>
+                <th>Dead</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    function updateModalLiveValues() {
+      for (let i = 0; i < 8; i++) {
+        const srcBox = el(`modalAxisSrc${i}`);
+        if (!srcBox) continue;
+
+        const srcText = el(`axisSrc${i}`)?.textContent || "-";
+        const srcNumber = srcText.startsWith("CH") ? Number(srcText.slice(2)) : null;
+        const rawValue = srcNumber && latestData?.raw ? latestData.raw[srcNumber - 1] : null;
+        const hidValue = latestData?.hid ? latestData.hid[i] : null;
+
+        srcBox.textContent = srcText;
+        el(`modalRaw${i}`).textContent = Number.isFinite(rawValue) ? rawValue : "-";
+        el(`modalHid${i}`).textContent = Number.isFinite(hidValue) ? hidValue : "-";
+        el(`modalMin${i}`).textContent = el(`axisMin${i}`)?.value || "-";
+        el(`modalMid${i}`).textContent = el(`axisMid${i}`)?.value || "-";
+        el(`modalMax${i}`).textContent = el(`axisMax${i}`)?.value || "-";
+        el(`modalInv${i}`).textContent = el(`axisInv${i}`)?.checked ? "Yes" : "No";
+        el(`modalDb${i}`).textContent = el(`axisDb${i}`)?.value || "-";
+      }
+    }
+
+    function openCaptureCenterModal() {
+      openModal(
+        "Capture center",
+        `
+          <p>This step stores the current stick positions as the center point for each configured axis.</p>
+
+          <ol>
+            <li>Center roll, pitch, and yaw.</li>
+            <li>Set throttle to 50%.</li>
+            <li>Do not move the sticks while capturing center.</li>
+            <li>Click <span class="modal-note-strong">Capture center now</span>.</li>
+          </ol>
+
+          <p>If no CRSF signal is active, the firmware will reject the command and the error will appear in the log.</p>
+        `,
+        [
+          {
+            label: "Cancel",
+            className: "secondary",
+            onClick: closeModal
+          },
+          {
+            label: "Capture center now",
+            className: "ok",
+            onClick: async () => {
+              const ok = await send("CFG CENTER");
+
+              if (!ok) return;
+
+              openModal(
+                "Center capture command sent",
+                `
+                  <p>The center capture command was sent to the firmware.</p>
+                  <p>If CRSF signal is active, the midpoint values will update in the advanced axis table.</p>
+                  <p>Next step: start travel calibration.</p>
+                `,
+                [
+                  {
+                    label: "Close",
+                    className: "secondary",
+                    onClick: closeModal
+                  },
+                  {
+                    label: "Start travel calibration",
+                    className: "warn",
+                    onClick: openStartTravelModal
+                  }
+                ]
+              );
+            }
+          }
+        ]
+      );
+    }
+
+    function openStartTravelModal() {
+      openModal(
+        "Start travel calibration",
+        `
+          <p>This step records the minimum and maximum values reached by each configured axis.</p>
+
+          <ol>
+            <li>Click <span class="modal-note-strong">Start calibration</span>.</li>
+            <li>Move every stick slowly to its full minimum and maximum positions.</li>
+            <li>Make sure each axis reaches both physical endpoints.</li>
+            <li>When finished, click <span class="modal-note-strong">Stop travel calibration</span> inside this window.</li>
+          </ol>
+
+          <p>Current axis input values:</p>
+          ${axisLiveTableHtml()}
+        `,
+        [
+          {
+            label: "Cancel",
+            className: "secondary",
+            onClick: closeModal
+          },
+          {
+            label: "Start calibration",
+            className: "warn",
+            onClick: async () => {
+              const ok = await send("CFG CALSTART");
+
+              if (!ok) return;
+
+              openTravelRunningModal();
+            }
+          }
+        ]
+      );
+    }
+
+    function openTravelRunningModal() {
+      openModal(
+        "Travel calibration running",
+        `
+          <p>Move all sticks to their full minimum and maximum positions now.</p>
+
+          <ol>
+            <li>Move roll fully left and right.</li>
+            <li>Move pitch fully forward and backward.</li>
+            <li>Move yaw fully left and right.</li>
+            <li>Move throttle fully down and fully up.</li>
+            <li>Move any additional configured axes to their full range.</li>
+          </ol>
+
+          <p>Live axis input values:</p>
+          ${axisLiveTableHtml()}
+        `,
+        [
+          {
+            label: "Stop travel calibration",
+            className: "ok",
+            onClick: stopTravelCalibration
+          }
+        ]
+      );
+    }
+
+    async function stopTravelCalibration() {
+      const ok = await send("CFG CALSTOP");
+
+      if (!ok) return;
+
+      await send("CFG GET");
+
+      openModal(
+        "Travel calibration stopped",
+        `
+          <p>The stop command was sent to the firmware.</p>
+          <p>Review the updated axis values. If they look correct, save the configuration.</p>
+
+          ${axisLiveTableHtml()}
+        `,
+        [
+          {
+            label: "Close",
+            className: "secondary",
+            onClick: closeModal
+          },
+          {
+            label: "Save now",
+            className: "ok",
+            onClick: async () => {
+              const saved = await send("CFG SAVE");
+
+              if (saved) {
+                closeModal();
+              }
+            }
+          }
+        ]
+      );
+    }
+
+    el("modalBackdrop").addEventListener("click", e => {
+      if (e.target.id === "modalBackdrop") {
+        closeModal();
+      }
     });
 
-    window.addEventListener("gamepaddisconnected", () => {
-      selectedGamepadIndex = null;
-      setStatus("gamepadStatus", "Joystick disconnected", "warn");
-      log("Joystick disconnected.");
+    window.addEventListener("keydown", e => {
+      if (e.key === "Escape") {
+        closeModal();
+      }
     });
 
     window.addEventListener("beforeunload", () => {
@@ -800,11 +1054,9 @@
     });
 
     el("connectSerial").onclick = connectSerial;
-    el("connectGamepad").onclick = connectGamepad;
 
-    el("center").onclick = () => send("CFG CENTER");
-    el("calStart").onclick = () => send("CFG CALSTART");
-    el("calStop").onclick = () => send("CFG CALSTOP");
+    el("center").onclick = openCaptureCenterModal;
+    el("calStart").onclick = openStartTravelModal;
     el("save").onclick = () => send("CFG SAVE");
 
     el("defaults").onclick = async () => {
@@ -823,14 +1075,6 @@
     el("applyAxes").onclick = applyAxes;
 
     makeUi();
-
-    /*
-      Start Gamepad API polling immediately as fallback.
-      Serial DATA remains the primary data source when connected.
-    */
-    if (navigator.getGamepads) {
-      pollGamepad();
-    }
   </script>
 </body>
 </html>
