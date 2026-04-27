@@ -1,1 +1,836 @@
-<!doctype html> <html lang="es"> <head> <meta charset="utf-8"> <title>USB ELRS Receiver Configurator</title> <meta name="viewport" content="width=device-width, initial-scale=1"> <style> :root { --bg: #101114; --panel: #191b20; --panel2: #20232a; --text: #f2f2f2; --muted: #a0a4ad; --line: #323640; --accent: #4aa3ff; --ok: #49d17d; --warn: #ffbd4a; --bad: #ff5c5c; } * { box-sizing: border-box; } body { margin: 0; padding: 24px; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; } h1 { margin: 0 0 6px; font-size: 26px; } h2 { margin: 0 0 16px; font-size: 18px; } p { color: var(--muted); line-height: 1.45; } button, select, input { font: inherit; } button { border: 0; border-radius: 8px; padding: 10px 14px; background: var(--accent); color: white; cursor: pointer; font-weight: 600; } button.secondary { background: var(--panel2); color: var(--text); border: 1px solid var(--line); } button.danger { background: var(--bad); } button.ok { background: var(--ok); color: #07140b; } button.warn { background: var(--warn); color: #1f1600; } button:disabled { opacity: .45; cursor: not-allowed; } select, input { background: #0f1013; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 7px; } input[type="number"] { width: 86px; } .layout { display: grid; grid-template-columns: 1.1fr .9fr; gap: 18px; margin-top: 20px; } .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px; margin-bottom: 18px; } .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; } .status { display: inline-block; padding: 4px 8px; border-radius: 999px; background: var(--panel2); color: var(--muted); font-size: 13px; } .status.ok { color: #041107; background: var(--ok); } .status.warn { color: #1b1200; background: var(--warn); } .bar-row { display: grid; grid-template-columns: 105px 1fr 84px; gap: 12px; align-items: center; margin: 11px 0; } .bar { position: relative; height: 18px; border-radius: 999px; background: #0d0e11; border: 1px solid var(--line); overflow: hidden; } .bar::after { content: ""; position: absolute; left: 50%; top: 0; width: 1px; height: 100%; background: #606673; } .fill { position: absolute; top: 0; bottom: 0; left: 50%; width: 0%; background: var(--accent); } .fill.negative { left: auto; right: 50%; } .value { font-variant-numeric: tabular-nums; color: var(--muted); text-align: right; } .small-values { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 12px; font-size: 13px; color: var(--muted); } .small-value { background: #0f1013; border: 1px solid var(--line); border-radius: 8px; padding: 8px; font-variant-numeric: tabular-nums; } .buttons-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 8px; } .btn-indicator { border: 1px solid var(--line); background: #0f1013; border-radius: 8px; padding: 10px 6px; text-align: center; color: var(--muted); font-size: 13px; } .btn-indicator.active { background: var(--ok); color: #041107; border-color: var(--ok); font-weight: 700; } table { width: 100%; border-collapse: collapse; font-size: 14px; } th, td { border-bottom: 1px solid var(--line); padding: 8px 6px; text-align: left; } th { color: var(--muted); font-weight: 600; } .log { background: #090a0c; border: 1px solid var(--line); border-radius: 10px; padding: 10px; height: 160px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; color: #c9ced8; white-space: pre-wrap; } details { margin-top: 8px; } summary { cursor: pointer; color: var(--accent); font-weight: 600; margin-bottom: 12px; } .note { color: var(--muted); font-size: 14px; } @media (max-width: 980px) { .layout { grid-template-columns: 1fr; } .buttons-grid { grid-template-columns: repeat(4, 1fr); } .small-values { grid-template-columns: repeat(2, 1fr); } } </style> </head> <body> <h1>USB ELRS Receiver Configurator</h1> <p>Configurador simple para SAMD21 + ELRS CRSF. La vista en tiempo real usa los datos enviados por Serial desde el firmware.</p> <div class="card"> <div class="row"> <button id="connectSerial">Conectar configuración</button> <button id="connectGamepad" class="secondary">Conectar joystick</button> <span id="serialStatus" class="status">Serial no conectado</span> <span id="gamepadStatus" class="status">Joystick opcional</span> <span id="signalStatus" class="status">CRSF desconocido</span> <span id="sourceStatus" class="status">Fuente: ninguna</span> </div> </div> <div class="layout"> <div> <div class="card"> <h2>Ejes en tiempo real</h2> <div id="axes"></div> <div id="rawValues" class="small-values"></div> </div> <div class="card"> <h2>Botones HID</h2> <div id="buttons" class="buttons-grid"></div> </div> <div class="card"> <h2>Calibración</h2> <p class="note"> Para capturar centro, pon roll/pitch/yaw centrados y throttle al 50%. Después inicia recorridos y mueve todos los sticks a sus extremos. </p> <div class="row"> <button class="secondary" id="center">1. Capturar centro</button> <button class="warn" id="calStart">2. Iniciar recorridos</button> <button class="secondary" id="calStop">3. Finalizar recorridos</button> <button class="ok" id="save">Guardar</button> <button class="danger" id="defaults">Defaults</button> </div> </div> </div> <div> <div class="card"> <h2>Mapeo de botones</h2> <p class="note">Cada botón HID puede activarse con cualquier canal CRSF en posición LOW, MID o HIGH.</p> <table> <thead> <tr> <th>Botón</th> <th>Canal</th> <th>Posición</th> </tr> </thead> <tbody id="buttonMap"></tbody> </table> <div class="row" style="margin-top:14px"> <button id="applyButtons">Aplicar botones</button> <button class="secondary" id="clearButtons">Limpiar botones</button> </div> </div> <div class="card"> <details> <summary>Avanzado: ejes</summary> <table> <thead> <tr> <th>Eje</th> <th>CH</th> <th>Min</th> <th>Mid</th> <th>Max</th> <th>Inv</th> <th>Dead</th> </tr> </thead> <tbody id="axisTable"></tbody> </table> <div class="row" style="margin-top:14px"> <button id="applyAxes">Aplicar ejes</button> </div> </details> </div> <div class="card"> <h2>Log</h2> <div id="log" class="log"></div> </div> </div> </div> <script> const axisNames = [ "Axis 1", "Axis 2", "Axis 3", "Axis 4", "Axis 5", "Axis 6", "Axis 7", "Axis 8" ]; let port = null; let reader = null; let writer = null; let serialBuffer = ""; let config = null; let latestData = null; let selectedGamepadIndex = null; let lastSerialDataMs = 0; const el = id => document.getElementById(id); function log(msg) { const box = el("log"); const t = new Date().toLocaleTimeString(); box.textContent += [${t}] ${msg}\n; box.scrollTop = box.scrollHeight; } function setStatus(id, text, mode = "") { const s = el(id); s.textContent = text; s.className = "status" + (mode ? " " + mode : ""); } function makeUi() { const axes = el("axes"); axes.innerHTML = ""; axisNames.forEach((name, i) => { const row = document.createElement("div"); row.className = "bar-row"; row.innerHTML = <div>${name}</div> <div class="bar"> <div id="axisFill${i}" class="fill"></div> </div> <div id="axisValue${i}" class="value">0.000</div> ; axes.appendChild(row); }); const rawValues = el("rawValues"); rawValues.innerHTML = ""; for (let i = 0; i < 16; i++) { const d = document.createElement("div"); d.id = raw${i}; d.className = "small-value"; d.textContent = CH${i + 1}: ----; rawValues.appendChild(d); } const buttons = el("buttons"); buttons.innerHTML = ""; for (let i = 0; i < 16; i++) { const b = document.createElement("div"); b.id = btn${i}; b.className = "btn-indicator"; b.textContent = B${i + 1}; buttons.appendChild(b); } const buttonMap = el("buttonMap"); buttonMap.innerHTML = ""; for (let i = 0; i < 16; i++) { const tr = document.createElement("tr"); const channelOptions = Array.from({ length: 16 }, (_, n) => { const ch = n + 1; return <option value="${ch}">CH${ch}</option>; }).join(""); tr.innerHTML = <td>B${i + 1}</td> <td> <select id="btnCh${i}"> ${channelOptions} </select> </td> <td> <select id="btnPos${i}"> <option value="OFF">OFF</option> <option value="LOW">LOW</option> <option value="MID">MID</option> <option value="HIGH">HIGH</option> </select> </td> ; buttonMap.appendChild(tr); } const axisTable = el("axisTable"); axisTable.innerHTML = ""; for (let i = 0; i < 8; i++) { const tr = document.createElement("tr"); tr.innerHTML = <td>${i + 1}</td> <td id="axisSrc${i}">-</td> <td><input id="axisMin${i}" type="number" min="0" max="2047" value="172"></td> <td><input id="axisMid${i}" type="number" min="0" max="2047" value="992"></td> <td><input id="axisMax${i}" type="number" min="0" max="2047" value="1811"></td> <td><input id="axisInv${i}" type="checkbox"></td> <td><input id="axisDb${i}" type="number" min="0" max="200" value="3"></td> ; axisTable.appendChild(tr); } } function updateAxisBar(i, value) { value = Number.isFinite(value) ? value : 0; value = Math.max(-1, Math.min(1, value)); const fill = el(axisFill${i}); const val = el(axisValue${i}); const pct = Math.abs(value) * 50; fill.style.width = ${pct}%; if (value < 0) { fill.classList.add("negative"); } else { fill.classList.remove("negative"); } val.textContent = value.toFixed(3); } function updateButton(i, active) { const b = el(btn${i}); b.classList.toggle("active", !!active); } function hidToNorm(v) { if (typeof v !== "number") return 0; const n = (v / 32767.5) - 1; return Math.max(-1, Math.min(1, n)); } function renderSerialData(d) { if (!d) return; lastSerialDataMs = performance.now(); setStatus("sourceStatus", "Fuente: Serial DATA", "ok"); if (Array.isArray(d.hid)) { for (let i = 0; i < 8; i++) { updateAxisBar(i, hidToNorm(d.hid[i] ?? 32767)); } } if (Array.isArray(d.raw)) { for (let i = 0; i < 16; i++) { const box = el(raw${i}); if (box) { box.textContent = CH${i + 1}: ${d.raw[i] ?? "----"}; } } } if (typeof d.buttons === "number") { for (let i = 0; i < 16; i++) { updateButton(i, (d.buttons & (1 << i)) !== 0); } } } function pollGamepad() { const pads = navigator.getGamepads ? navigator.getGamepads() : []; let gp = null; if (selectedGamepadIndex !== null) { gp = pads[selectedGamepadIndex]; } if (!gp) { for (const p of pads) { if (p) { gp = p; selectedGamepadIndex = p.index; break; } } } if (!gp) { if (performance.now() - lastSerialDataMs > 1000) { setStatus("gamepadStatus", "Joystick no detectado"); } requestAnimationFrame(pollGamepad); return; } setStatus("gamepadStatus", ${gp.id}, "ok"); /* Serial DATA tiene prioridad. Si no llegan datos Serial recientes, usamos Gamepad API como fallback. */ const serialIsRecent = performance.now() - lastSerialDataMs < 300; if (!serialIsRecent) { setStatus("sourceStatus", "Fuente: Gamepad API", "warn"); for (let i = 0; i < 8; i++) { updateAxisBar(i, gp.axes[i] ?? 0); } for (let i = 0; i < 16; i++) { const active = gp.buttons[i] && gp.buttons[i].pressed; updateButton(i, active); } } requestAnimationFrame(pollGamepad); } async function connectGamepad() { if (!navigator.getGamepads) { alert("Este navegador no soporta Gamepad API."); return; } log("Gamepad API activada. Mueve un stick o pulsa un botón si el joystick no aparece."); pollGamepad(); } async function connectSerial() { if (!("serial" in navigator)) { alert("Este navegador no soporta Web Serial. Usa Chrome o Edge en escritorio."); return; } try { port = await navigator.serial.requestPort(); await port.open({ baudRate: 420000 }); writer = port.writable.getWriter(); reader = port.readable.getReader(); setStatus("serialStatus", "Serial conectado", "ok"); log("Serial conectado."); readLoop(); await send("CFG GET"); await send("CFG STREAM 1"); } catch (e) { setStatus("serialStatus", "Error Serial", "warn"); log("Error conectando Serial: " + e.message); } } async function readLoop() { const decoder = new TextDecoder(); while (port && reader) { try { const { value, done } = await reader.read(); if (done) break; if (!value) continue; serialBuffer += decoder.decode(value, { stream: true }); let idx; while ((idx = serialBuffer.indexOf("\n")) >= 0) { const line = serialBuffer.slice(0, idx).trim(); serialBuffer = serialBuffer.slice(idx + 1); if (line) handleLine(line); } } catch (e) { log("Serial read error: " + e.message); break; } } } function handleLine(line) { if (line.startsWith("CFG ")) { const payload = line.slice(4); try { config = JSON.parse(payload); applyConfigToUi(); log("Config recibida."); } catch (e) { log(line); } return; } if (line.startsWith("DATA ")) { const payload = line.slice(5); try { latestData = JSON.parse(payload); setStatus( "signalStatus", latestData.signal ? "CRSF OK" : "Sin CRSF", latestData.signal ? "ok" : "warn" ); renderSerialData(latestData); } catch (e) { log("DATA parse error: " + line); } return; } log(line); } async function send(cmd) { if (!writer) { alert("Primero conecta configuración."); return; } const encoder = new TextEncoder(); await writer.write(encoder.encode(cmd + "\n")); log("> " + cmd); } function applyConfigToUi() { if (!config) return; if (Array.isArray(config.axisSource)) { for (let i = 0; i < 8; i++) { el(axisSrc${i}).textContent = "CH" + config.axisSource[i]; } } if (Array.isArray(config.axes)) { config.axes.forEach((a, i) => { if (i >= 8) return; el(axisMin${i}).value = a.min; el(axisMid${i}).value = a.mid; el(axisMax${i}).value = a.max; el(axisInv${i}).checked = !!a.invert; el(axisDb${i}).value = a.deadband; }); } if (Array.isArray(config.buttons)) { config.buttons.forEach((b, i) => { if (i >= 16) return; el(btnCh${i}).value = b.channel || 1; el(btnPos${i}).value = b.enabled ? b.position : "OFF"; }); } } async function applyButtons() { for (let i = 0; i < 16; i++) { const ch = el(btnCh${i}).value; const pos = el(btnPos${i}).value; await send(CFG BTN ${i + 1} ${ch} ${pos}); } await send("CFG GET"); } async function applyAxes() { for (let i = 0; i < 8; i++) { const min = el(axisMin${i}).value; const mid = el(axisMid${i}).value; const max = el(axisMax${i}).value; const inv = el(axisInv${i}).checked ? 1 : 0; const db = el(axisDb${i}).value; await send(CFG AXIS ${i + 1} ${min} ${mid} ${max} ${inv} ${db}); } await send("CFG GET"); } window.addEventListener("gamepadconnected", e => { selectedGamepadIndex = e.gamepad.index; setStatus("gamepadStatus", ${e.gamepad.id}, "ok"); log("Joystick conectado: " + e.gamepad.id); }); window.addEventListener("gamepaddisconnected", () => { selectedGamepadIndex = null; setStatus("gamepadStatus", "Joystick desconectado", "warn"); log("Joystick desconectado."); }); window.addEventListener("beforeunload", () => { try { if (writer) { const encoder = new TextEncoder(); writer.write(encoder.encode("CFG STREAM 0\n")); } } catch (_) {} }); el("connectSerial").onclick = connectSerial; el("connectGamepad").onclick = connectGamepad; el("center").onclick = () => send("CFG CENTER"); el("calStart").onclick = () => send("CFG CALSTART"); el("calStop").onclick = () => send("CFG CALSTOP"); el("save").onclick = () => send("CFG SAVE"); el("defaults").onclick = async () => { if (confirm("Restaurar configuración por defecto y guardar?")) { await send("CFG DEFAULTS"); } }; el("applyButtons").onclick = applyButtons; el("clearButtons").onclick = async () => { await send("CFG BTNCLR"); await send("CFG GET"); }; el("applyAxes").onclick = applyAxes; makeUi(); /* Activamos polling de Gamepad desde el inicio como fallback. La fuente principal sigue siendo Serial DATA cuando está conectado. */ if (navigator.getGamepads) { pollGamepad(); } </script> </body> </html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>USB ELRS Receiver Configurator</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <style>
+    :root {
+      --bg: #101114;
+      --panel: #191b20;
+      --panel2: #20232a;
+      --text: #f2f2f2;
+      --muted: #a0a4ad;
+      --line: #323640;
+      --accent: #4aa3ff;
+      --ok: #49d17d;
+      --warn: #ffbd4a;
+      --bad: #ff5c5c;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 24px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    h1 {
+      margin: 0 0 6px;
+      font-size: 26px;
+    }
+
+    h2 {
+      margin: 0 0 16px;
+      font-size: 18px;
+    }
+
+    p {
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    button, select, input {
+      font: inherit;
+    }
+
+    button {
+      border: 0;
+      border-radius: 8px;
+      padding: 10px 14px;
+      background: var(--accent);
+      color: white;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    button.secondary {
+      background: var(--panel2);
+      color: var(--text);
+      border: 1px solid var(--line);
+    }
+
+    button.danger {
+      background: var(--bad);
+    }
+
+    button.ok {
+      background: var(--ok);
+      color: #07140b;
+    }
+
+    button.warn {
+      background: var(--warn);
+      color: #1f1600;
+    }
+
+    button:disabled {
+      opacity: .45;
+      cursor: not-allowed;
+    }
+
+    select, input {
+      background: #0f1013;
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 7px;
+    }
+
+    input[type="number"] {
+      width: 86px;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 1.1fr .9fr;
+      gap: 18px;
+      margin-top: 20px;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 18px;
+      margin-bottom: 18px;
+    }
+
+    .row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .status {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: var(--panel2);
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .status.ok {
+      color: #041107;
+      background: var(--ok);
+    }
+
+    .status.warn {
+      color: #1b1200;
+      background: var(--warn);
+    }
+
+    .bar-row {
+      display: grid;
+      grid-template-columns: 105px 1fr 84px;
+      gap: 12px;
+      align-items: center;
+      margin: 11px 0;
+    }
+
+    .bar {
+      position: relative;
+      height: 18px;
+      border-radius: 999px;
+      background: #0d0e11;
+      border: 1px solid var(--line);
+      overflow: hidden;
+    }
+
+    .bar::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 0;
+      width: 1px;
+      height: 100%;
+      background: #606673;
+    }
+
+    .fill {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 50%;
+      width: 0%;
+      background: var(--accent);
+    }
+
+    .fill.negative {
+      left: auto;
+      right: 50%;
+    }
+
+    .value {
+      font-variant-numeric: tabular-nums;
+      color: var(--muted);
+      text-align: right;
+    }
+
+    .small-values {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      margin-top: 12px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .small-value {
+      background: #0f1013;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .buttons-grid {
+      display: grid;
+      grid-template-columns: repeat(8, 1fr);
+      gap: 8px;
+    }
+
+    .btn-indicator {
+      border: 1px solid var(--line);
+      background: #0f1013;
+      border-radius: 8px;
+      padding: 10px 6px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .btn-indicator.active {
+      background: var(--ok);
+      color: #041107;
+      border-color: var(--ok);
+      font-weight: 700;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 8px 6px;
+      text-align: left;
+    }
+
+    th {
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    .log {
+      background: #090a0c;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+      height: 160px;
+      overflow: auto;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      color: #c9ced8;
+      white-space: pre-wrap;
+    }
+
+    details {
+      margin-top: 8px;
+    }
+
+    summary {
+      cursor: pointer;
+      color: var(--accent);
+      font-weight: 600;
+      margin-bottom: 12px;
+    }
+
+    .note {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    @media (max-width: 980px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      .buttons-grid {
+        grid-template-columns: repeat(4, 1fr);
+      }
+
+      .small-values {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <h1>USB ELRS Receiver Configurator</h1>
+  <p>Web configurator for a USB ELRS/CRSF simulator receiver. The real-time view uses data streamed over USB Serial by the firmware.</p>
+
+  <div class="card">
+    <div class="row">
+      <button id="connectSerial">Connect configuration</button>
+      <button id="connectGamepad" class="secondary">Connect joystick</button>
+      <span id="serialStatus" class="status">Serial not connected</span>
+      <span id="gamepadStatus" class="status">Joystick optional</span>
+      <span id="signalStatus" class="status">CRSF unknown</span>
+      <span id="sourceStatus" class="status">Source: none</span>
+    </div>
+  </div>
+
+  <div class="layout">
+    <div>
+      <div class="card">
+        <h2>Real-time Axes</h2>
+        <div id="axes"></div>
+
+        <div id="rawValues" class="small-values"></div>
+      </div>
+
+      <div class="card">
+        <h2>HID Buttons</h2>
+        <div id="buttons" class="buttons-grid"></div>
+      </div>
+
+      <div class="card">
+        <h2>Calibration</h2>
+        <p class="note">
+          To capture center, keep roll, pitch, and yaw centered and set throttle to 50%.
+          Then start travel calibration and move all sticks to their full minimum and maximum positions.
+        </p>
+
+        <div class="row">
+          <button class="secondary" id="center">1. Capture center</button>
+          <button class="warn" id="calStart">2. Start travel calibration</button>
+          <button class="secondary" id="calStop">3. Stop travel calibration</button>
+          <button class="ok" id="save">Save</button>
+          <button class="danger" id="defaults">Defaults</button>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <h2>Button Mapping</h2>
+        <p class="note">Each HID button can be activated by any CRSF channel in LOW, MID, or HIGH position.</p>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Button</th>
+              <th>Channel</th>
+              <th>Position</th>
+            </tr>
+          </thead>
+          <tbody id="buttonMap"></tbody>
+        </table>
+
+        <div class="row" style="margin-top:14px">
+          <button id="applyButtons">Apply buttons</button>
+          <button class="secondary" id="clearButtons">Clear buttons</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <details>
+          <summary>Advanced: axes</summary>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Axis</th>
+                <th>CH</th>
+                <th>Min</th>
+                <th>Mid</th>
+                <th>Max</th>
+                <th>Inv</th>
+                <th>Dead</th>
+              </tr>
+            </thead>
+            <tbody id="axisTable"></tbody>
+          </table>
+
+          <div class="row" style="margin-top:14px">
+            <button id="applyAxes">Apply axes</button>
+          </div>
+        </details>
+      </div>
+
+      <div class="card">
+        <h2>Log</h2>
+        <div id="log" class="log"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const axisNames = [
+      "Axis 1", "Axis 2", "Axis 3", "Axis 4",
+      "Axis 5", "Axis 6", "Axis 7", "Axis 8"
+    ];
+
+    let port = null;
+    let reader = null;
+    let writer = null;
+    let serialBuffer = "";
+    let config = null;
+    let latestData = null;
+    let selectedGamepadIndex = null;
+    let lastSerialDataMs = 0;
+
+    const el = id => document.getElementById(id);
+
+    function log(msg) {
+      const box = el("log");
+      const t = new Date().toLocaleTimeString();
+      box.textContent += `[${t}] ${msg}\n`;
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function setStatus(id, text, mode = "") {
+      const s = el(id);
+      s.textContent = text;
+      s.className = "status" + (mode ? " " + mode : "");
+    }
+
+    function makeUi() {
+      const axes = el("axes");
+      axes.innerHTML = "";
+
+      axisNames.forEach((name, i) => {
+        const row = document.createElement("div");
+        row.className = "bar-row";
+        row.innerHTML = `
+          <div>${name}</div>
+          <div class="bar">
+            <div id="axisFill${i}" class="fill"></div>
+          </div>
+          <div id="axisValue${i}" class="value">0.000</div>
+        `;
+        axes.appendChild(row);
+      });
+
+      const rawValues = el("rawValues");
+      rawValues.innerHTML = "";
+      for (let i = 0; i < 16; i++) {
+        const d = document.createElement("div");
+        d.id = `raw${i}`;
+        d.className = "small-value";
+        d.textContent = `CH${i + 1}: ----`;
+        rawValues.appendChild(d);
+      }
+
+      const buttons = el("buttons");
+      buttons.innerHTML = "";
+      for (let i = 0; i < 16; i++) {
+        const b = document.createElement("div");
+        b.id = `btn${i}`;
+        b.className = "btn-indicator";
+        b.textContent = `B${i + 1}`;
+        buttons.appendChild(b);
+      }
+
+      const buttonMap = el("buttonMap");
+      buttonMap.innerHTML = "";
+      for (let i = 0; i < 16; i++) {
+        const tr = document.createElement("tr");
+
+        const channelOptions = Array.from({ length: 16 }, (_, n) => {
+          const ch = n + 1;
+          return `<option value="${ch}">CH${ch}</option>`;
+        }).join("");
+
+        tr.innerHTML = `
+          <td>B${i + 1}</td>
+          <td>
+            <select id="btnCh${i}">
+              ${channelOptions}
+            </select>
+          </td>
+          <td>
+            <select id="btnPos${i}">
+              <option value="OFF">OFF</option>
+              <option value="LOW">LOW</option>
+              <option value="MID">MID</option>
+              <option value="HIGH">HIGH</option>
+            </select>
+          </td>
+        `;
+
+        buttonMap.appendChild(tr);
+      }
+
+      const axisTable = el("axisTable");
+      axisTable.innerHTML = "";
+      for (let i = 0; i < 8; i++) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${i + 1}</td>
+          <td id="axisSrc${i}">-</td>
+          <td><input id="axisMin${i}" type="number" min="0" max="2047" value="172"></td>
+          <td><input id="axisMid${i}" type="number" min="0" max="2047" value="992"></td>
+          <td><input id="axisMax${i}" type="number" min="0" max="2047" value="1811"></td>
+          <td><input id="axisInv${i}" type="checkbox"></td>
+          <td><input id="axisDb${i}" type="number" min="0" max="200" value="3"></td>
+        `;
+        axisTable.appendChild(tr);
+      }
+    }
+
+    function updateAxisBar(i, value) {
+      value = Number.isFinite(value) ? value : 0;
+      value = Math.max(-1, Math.min(1, value));
+
+      const fill = el(`axisFill${i}`);
+      const val = el(`axisValue${i}`);
+
+      const pct = Math.abs(value) * 50;
+      fill.style.width = `${pct}%`;
+
+      if (value < 0) {
+        fill.classList.add("negative");
+      } else {
+        fill.classList.remove("negative");
+      }
+
+      val.textContent = value.toFixed(3);
+    }
+
+    function updateButton(i, active) {
+      const b = el(`btn${i}`);
+      b.classList.toggle("active", !!active);
+    }
+
+    function hidToNorm(v) {
+      if (typeof v !== "number") return 0;
+
+      const n = (v / 32767.5) - 1;
+
+      return Math.max(-1, Math.min(1, n));
+    }
+
+    function renderSerialData(d) {
+      if (!d) return;
+
+      lastSerialDataMs = performance.now();
+      setStatus("sourceStatus", "Source: Serial DATA", "ok");
+
+      if (Array.isArray(d.hid)) {
+        for (let i = 0; i < 8; i++) {
+          updateAxisBar(i, hidToNorm(d.hid[i] ?? 32767));
+        }
+      }
+
+      if (Array.isArray(d.raw)) {
+        for (let i = 0; i < 16; i++) {
+          const box = el(`raw${i}`);
+          if (box) {
+            box.textContent = `CH${i + 1}: ${d.raw[i] ?? "----"}`;
+          }
+        }
+      }
+
+      if (typeof d.buttons === "number") {
+        for (let i = 0; i < 16; i++) {
+          updateButton(i, (d.buttons & (1 << i)) !== 0);
+        }
+      }
+    }
+
+    function pollGamepad() {
+      const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+      let gp = null;
+
+      if (selectedGamepadIndex !== null) {
+        gp = pads[selectedGamepadIndex];
+      }
+
+      if (!gp) {
+        for (const p of pads) {
+          if (p) {
+            gp = p;
+            selectedGamepadIndex = p.index;
+            break;
+          }
+        }
+      }
+
+      if (!gp) {
+        if (performance.now() - lastSerialDataMs > 1000) {
+          setStatus("gamepadStatus", "Joystick not detected");
+        }
+        requestAnimationFrame(pollGamepad);
+        return;
+      }
+
+      setStatus("gamepadStatus", `${gp.id}`, "ok");
+
+      /*
+        Serial DATA has priority.
+        If no recent Serial data is received, the Gamepad API is used as fallback.
+      */
+      const serialIsRecent = performance.now() - lastSerialDataMs < 300;
+
+      if (!serialIsRecent) {
+        setStatus("sourceStatus", "Source: Gamepad API", "warn");
+
+        for (let i = 0; i < 8; i++) {
+          updateAxisBar(i, gp.axes[i] ?? 0);
+        }
+
+        for (let i = 0; i < 16; i++) {
+          const active = gp.buttons[i] && gp.buttons[i].pressed;
+          updateButton(i, active);
+        }
+      }
+
+      requestAnimationFrame(pollGamepad);
+    }
+
+    async function connectGamepad() {
+      if (!navigator.getGamepads) {
+        alert("This browser does not support the Gamepad API.");
+        return;
+      }
+
+      log("Gamepad API enabled. Move a stick or press a button if the joystick does not appear.");
+      pollGamepad();
+    }
+
+    async function connectSerial() {
+      if (!("serial" in navigator)) {
+        alert("This browser does not support Web Serial. Use Chrome or Edge on desktop.");
+        return;
+      }
+
+      try {
+        port = await navigator.serial.requestPort();
+        await port.open({ baudRate: 420000 });
+
+        writer = port.writable.getWriter();
+        reader = port.readable.getReader();
+
+        setStatus("serialStatus", "Serial connected", "ok");
+        log("Serial connected.");
+
+        readLoop();
+
+        await send("CFG GET");
+        await send("CFG STREAM 1");
+      } catch (e) {
+        setStatus("serialStatus", "Serial error", "warn");
+        log("Serial connection error: " + e.message);
+      }
+    }
+
+    async function readLoop() {
+      const decoder = new TextDecoder();
+
+      while (port && reader) {
+        try {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (!value) continue;
+
+          serialBuffer += decoder.decode(value, { stream: true });
+
+          let idx;
+          while ((idx = serialBuffer.indexOf("\n")) >= 0) {
+            const line = serialBuffer.slice(0, idx).trim();
+            serialBuffer = serialBuffer.slice(idx + 1);
+
+            if (line) handleLine(line);
+          }
+        } catch (e) {
+          log("Serial read error: " + e.message);
+          break;
+        }
+      }
+    }
+
+    function handleLine(line) {
+      if (line.startsWith("CFG ")) {
+        const payload = line.slice(4);
+
+        try {
+          config = JSON.parse(payload);
+          applyConfigToUi();
+          log("Config received.");
+        } catch (e) {
+          log(line);
+        }
+
+        return;
+      }
+
+      if (line.startsWith("DATA ")) {
+        const payload = line.slice(5);
+
+        try {
+          latestData = JSON.parse(payload);
+
+          setStatus(
+            "signalStatus",
+            latestData.signal ? "CRSF OK" : "No CRSF",
+            latestData.signal ? "ok" : "warn"
+          );
+
+          renderSerialData(latestData);
+
+        } catch (e) {
+          log("DATA parse error: " + line);
+        }
+
+        return;
+      }
+
+      log(line);
+    }
+
+    async function send(cmd) {
+      if (!writer) {
+        alert("Connect configuration first.");
+        return;
+      }
+
+      const encoder = new TextEncoder();
+      await writer.write(encoder.encode(cmd + "\n"));
+      log("> " + cmd);
+    }
+
+    function applyConfigToUi() {
+      if (!config) return;
+
+      if (Array.isArray(config.axisSource)) {
+        for (let i = 0; i < 8; i++) {
+          el(`axisSrc${i}`).textContent = "CH" + config.axisSource[i];
+        }
+      }
+
+      if (Array.isArray(config.axes)) {
+        config.axes.forEach((a, i) => {
+          if (i >= 8) return;
+
+          el(`axisMin${i}`).value = a.min;
+          el(`axisMid${i}`).value = a.mid;
+          el(`axisMax${i}`).value = a.max;
+          el(`axisInv${i}`).checked = !!a.invert;
+          el(`axisDb${i}`).value = a.deadband;
+        });
+      }
+
+      if (Array.isArray(config.buttons)) {
+        config.buttons.forEach((b, i) => {
+          if (i >= 16) return;
+
+          el(`btnCh${i}`).value = b.channel || 1;
+          el(`btnPos${i}`).value = b.enabled ? b.position : "OFF";
+        });
+      }
+    }
+
+    async function applyButtons() {
+      for (let i = 0; i < 16; i++) {
+        const ch = el(`btnCh${i}`).value;
+        const pos = el(`btnPos${i}`).value;
+
+        await send(`CFG BTN ${i + 1} ${ch} ${pos}`);
+      }
+
+      await send("CFG GET");
+    }
+
+    async function applyAxes() {
+      for (let i = 0; i < 8; i++) {
+        const min = el(`axisMin${i}`).value;
+        const mid = el(`axisMid${i}`).value;
+        const max = el(`axisMax${i}`).value;
+        const inv = el(`axisInv${i}`).checked ? 1 : 0;
+        const db = el(`axisDb${i}`).value;
+
+        await send(`CFG AXIS ${i + 1} ${min} ${mid} ${max} ${inv} ${db}`);
+      }
+
+      await send("CFG GET");
+    }
+
+    window.addEventListener("gamepadconnected", e => {
+      selectedGamepadIndex = e.gamepad.index;
+      setStatus("gamepadStatus", `${e.gamepad.id}`, "ok");
+      log("Joystick connected: " + e.gamepad.id);
+    });
+
+    window.addEventListener("gamepaddisconnected", () => {
+      selectedGamepadIndex = null;
+      setStatus("gamepadStatus", "Joystick disconnected", "warn");
+      log("Joystick disconnected.");
+    });
+
+    window.addEventListener("beforeunload", () => {
+      try {
+        if (writer) {
+          const encoder = new TextEncoder();
+          writer.write(encoder.encode("CFG STREAM 0\n"));
+        }
+      } catch (_) {}
+    });
+
+    el("connectSerial").onclick = connectSerial;
+    el("connectGamepad").onclick = connectGamepad;
+
+    el("center").onclick = () => send("CFG CENTER");
+    el("calStart").onclick = () => send("CFG CALSTART");
+    el("calStop").onclick = () => send("CFG CALSTOP");
+    el("save").onclick = () => send("CFG SAVE");
+
+    el("defaults").onclick = async () => {
+      if (confirm("Restore default configuration and save?")) {
+        await send("CFG DEFAULTS");
+      }
+    };
+
+    el("applyButtons").onclick = applyButtons;
+
+    el("clearButtons").onclick = async () => {
+      await send("CFG BTNCLR");
+      await send("CFG GET");
+    };
+
+    el("applyAxes").onclick = applyAxes;
+
+    makeUi();
+
+    /*
+      Start Gamepad API polling immediately as fallback.
+      Serial DATA remains the primary data source when connected.
+    */
+    if (navigator.getGamepads) {
+      pollGamepad();
+    }
+  </script>
+</body>
+</html>
