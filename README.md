@@ -1,6 +1,6 @@
 # USB ELRS Sim Receiver
 
-Use your ExpressLRS transmitter as a USB joystick for PC simulators using a Seeed Studio XIAO board and an ELRS receiver.
+Use your ExpressLRS Radio transmitter as a USB joystick for PC simulators using a Seeed Studio XIAO board and an ELRS receiver.
 
 This project is based on [pfeerick/USB_ELRS_Receiver](https://github.com/pfeerick/USB_ELRS_Receiver), with added Web Serial configuration, live channel monitoring, calibration, persistent settings, and configurable HID button mapping.
 
