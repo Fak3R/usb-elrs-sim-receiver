@@ -158,7 +158,7 @@ On some Windows systems, RP2040 upload may require installing a driver with [Zad
 The web configurator is provided in:
 
 ```text
-index.html
+[OPERN WEB CONFIGURATOR](https://fak3r.github.io/usb-elrs-sim-receiver/)
 ```
 
 It uses the browser Web Serial API to communicate with the firmware.
@@ -168,7 +168,7 @@ To use it:
 1. Flash the firmware.
 2. Connect the USB ELRS receiver to the Computer.
 3. Power on and bind your Radio.
-4. Open `index.html`.
+4. Open `[index.html](https://fak3r.github.io/usb-elrs-sim-receiver/)`.
 5. Click **Connect configuration**.
 6. Select the USB Serial port for the device.
 7. Use the live monitor, calibration, and button mapping tools.
