@@ -2,7 +2,7 @@
 
 Use your ExpressLRS Radio transmitter as a USB joystick for PC simulators using a Seeed Studio XIAO board and an ELRS receiver.
 
-This project is based on [pfeerick/USB_ELRS_Receiver](https://github.com/pfeerick/USB_ELRS_Receiver), with added Web Serial configuration, live channel monitoring, calibration, persistent settings, and configurable HID button mapping.
+This project is based on [pfeerick/USB_ELRS_Receiver](https://github.com/pfeerick/USB_ELRS_Receiver), with added Web Serial configuration, live channel monitoring, calibration, persistent settings, configurable HID button mapping, and optional keyboard HID output.
 
 ---
 
@@ -14,8 +14,9 @@ The included web configurator communicates with the device through Web Serial an
 
 The device appears on the computer as:
 
-- a USB HID joystick / gamepad
-- a USB Serial configuration interface
+  * a USB HID joystick / gamepad
+  * an optional USB HID keyboard output
+  * a USB Serial configuration interface
 
 ---
 
@@ -26,7 +27,7 @@ The device appears on the computer as:
 - ExpressLRS / CRSF receiver input
 - 8 analog joystick axes
 - 16 HID buttons
-- Web Serial configurator
+- Optional USB HID keyboard output
 - Live CRSF channel monitor
 - Live HID axis preview
 - Live button state preview
@@ -230,31 +231,31 @@ After changing mappings:
 
 ---
 
-Axis configuration:
+The web configurator also allows assigning a keyboard key to each logical button.
 
-```text
-CFG AXIS <axis> <min> <mid> <max> <invert> <deadband>
-```
+To assign a keyboard key:
+
+  1. Open the web configurator.
+  2. Connect the device.
+  3. In the Button Mapping table, click the Keyboard field for the desired button.
+  4. Press the keyboard key you want to assign.
+  5. Click Apply buttons + keys.
+  6. Click Save.
+
+Behavior:
+
+  * If a logical button has no keyboard key assigned, it is sent as a normal joystick button.
+  * If a logical button has a keyboard key assigned, the firmware sends the keyboard key instead of the joystick button.
+  * This prevents duplicate input in games that detect both joystick buttons and keyboard keys.
 
 Example:
 
-```text
-CFG AXIS 1 172 992 1811 0 3
-```
+    CRSF CH6 LOW  ->  Logical Button 1  ->  Keyboard Q
+    CRSF CH6 HIGH ->  Logical Button 2  ->  Keyboard E
 
-Button configuration:
+This is useful for games or simulators that do not detect generic HID joystick buttons correctly but do accept keyboard input.
 
-```text
-CFG BTN <button> <channel> <position>
-```
-
-Example:
-
-```text
-CFG BTN 1 5 HIGH
-```
-
----
+Keyboard mappings are stored persistently together with the rest of the device configuration on the USB board.
 
 ## Troubleshooting
 
@@ -309,7 +310,22 @@ Check:
 * Whether the mapping was saved.
 
 ---
+### The game detects Windows joystick buttons, but not inside the game
 
+Some games do not read generic HID / DirectInput joystick buttons correctly.  
+If the buttons are visible in Windows but ignored by the game, assign keyboard keys to the logical buttons from the web configurator.
+
+Recommended check:
+
+  1. Open the Windows joystick panel with `joy.cpl`.
+  2. Confirm that the logical buttons activate.
+  3. Open the web configurator.
+  4. Assign keyboard keys to the buttons.
+  5. Click Apply buttons + keys.
+  6. Click Save.
+  7. Test in a text editor or inside the game.
+
+When a keyboard key is assigned to a logical button, the firmware sends the key instead of the joystick button to avoid duplicate input.
 
 ## Acknowledgments
 
@@ -317,7 +333,7 @@ Based on the project originally developed by Peter Feerick:
 
 * [https://github.com/pfeerick/USB_ELRS_Receiver](https://github.com/pfeerick/USB_ELRS_Receiver)
 
-This version adds Web Serial configuration, live monitoring, calibration, persistent settings, and configurable HID button mapping.
+This version adds Web Serial configuration, live monitoring, calibration, persistent settings, configurable HID button mapping, and optional keyboard HID output with per-button key assignment.
 ```
 The image paths and part of the readme come from the original `pfeerick/USB_ELRS_Receiver` `doc/xiao-samd21-wiring.png`, `doc/xiao-rp2040-wiring.png`, `doc/xiao-samd21-built-unit.png`, `doc/xiao-rp2040-built-unit.png`, and `doc/pio-upload.png`. 
 ```
