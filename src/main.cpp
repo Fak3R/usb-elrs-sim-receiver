@@ -13,12 +13,14 @@
   Features:
   - CRSF input from ELRS receiver
   - USB HID joystick output
+  - USB HID keyboard output
   - 8 analog axes
-  - 16 joystick buttons
+  - 16 logical buttons
   - Browser configuration through USB Serial / Web Serial
   - Automatic calibration: center, min, max
   - Persistent configuration
   - Button mapping: any CRSF channel to LOW / MID / HIGH button state
+  - Key mapping: each logical button can send a configurable keyboard HID key
 
   Persistent storage:
   - SAMD21: FlashStorage
@@ -32,7 +34,7 @@
 #endif
 
 // ------------------------------------------------------------
-// HID descriptor: 8 axes, 16-bit each + 16 buttons
+// HID descriptor: 8 axes, 16-bit each + 16 buttons + keyboard
 // ------------------------------------------------------------
 
 #define TUD_HID_REPORT_DESC_GAMEPAD_16BTN(...) \
@@ -64,10 +66,16 @@
   HID_INPUT(HID_DATA | HID_VARIABLE | HID_ABSOLUTE), \
   HID_COLLECTION_END
 
+enum {
+  RID_GAMEPAD  = 1,
+  RID_KEYBOARD = 2
+};
+
 Adafruit_USBD_HID usb_hid;
 
 uint8_t const desc_hid_report[] = {
-  TUD_HID_REPORT_DESC_GAMEPAD_16BTN()
+  TUD_HID_REPORT_DESC_GAMEPAD_16BTN(HID_REPORT_ID(RID_GAMEPAD)),
+  TUD_HID_REPORT_DESC_KEYBOARD(HID_REPORT_ID(RID_KEYBOARD))
 };
 
 // ------------------------------------------------------------
@@ -116,7 +124,7 @@ static const uint8_t AXIS_SOURCE[8] = {
 // ------------------------------------------------------------
 
 #define CONFIG_MAGIC 0x45524C53UL  // "ELRS"
-#define CONFIG_VERSION 1
+#define CONFIG_VERSION 2
 
 #define BTN_OFF  0
 #define BTN_LOW  1
@@ -144,6 +152,11 @@ struct DeviceConfig {
   uint16_t version;
   AxisConfig axis[8];
   ButtonConfig button[16];
+
+  // Keyboard HID usage per logical button.
+  // 0 = OFF. When key[i] != 0, logical button i sends keyboard only,
+  // and is not sent as a joystick button to avoid duplicate input.
+  uint8_t key[16];
 };
 
 #if !defined(ARDUINO_ARCH_RP2040)
@@ -162,6 +175,13 @@ typedef struct __attribute__((packed)) {
 } gp_t;
 
 static gp_t gp;
+
+// Logical button state before output filtering.
+// This is what the CRSF/button remapper produces.
+static uint16_t logicalButtons = 0;
+
+// Last keyboard report sent.
+static uint8_t lastKeyboardKeys[6] = {0};
 
 // ------------------------------------------------------------
 // Runtime state
@@ -200,6 +220,9 @@ void updateCalibration();
 void updateButtons();
 uint16_t mapAxis(uint16_t raw, const AxisConfig &cfg);
 bool channelMatchesPosition(uint16_t raw, uint8_t pos);
+void sendKeyboardFromButtons(uint16_t buttons);
+uint8_t parseKeyCode(const char *s);
+void printKeyName(uint8_t key);
 
 // ------------------------------------------------------------
 // Config
@@ -231,6 +254,7 @@ void loadDefaults()
     config.button[i].enabled = 0;
     config.button[i].channel = 0;
     config.button[i].position = BTN_OFF;
+    config.key[i] = HID_KEY_NONE;
   }
 
   // Sensible defaults:
@@ -362,6 +386,7 @@ void updateCalibration()
 
 void updateButtons()
 {
+  logicalButtons = 0;
   gp.buttons = 0;
 
   for (uint8_t i = 0; i < 16; i++) {
@@ -371,8 +396,105 @@ void updateButtons()
     if (b.channel >= CRSF_NUM_CHANNELS) continue;
 
     if (channelMatchesPosition(rawCh[b.channel], b.position)) {
-      gp.buttons |= (1 << i);
+      logicalButtons |= (1 << i);
+
+      // If the logical button has a keyboard key assigned, do not also
+      // send it as a joystick button. This avoids double input in games.
+      if (config.key[i] == HID_KEY_NONE) {
+        gp.buttons |= (1 << i);
+      }
     }
+  }
+}
+
+void sendKeyboardFromButtons(uint16_t buttons)
+{
+  uint8_t keys[6] = {0};
+  uint8_t count = 0;
+
+  for (uint8_t i = 0; i < 16 && count < 6; i++) {
+    if ((buttons & (1 << i)) && config.key[i] != HID_KEY_NONE) {
+      keys[count++] = config.key[i];
+    }
+  }
+
+  if (memcmp(keys, lastKeyboardKeys, sizeof(keys)) != 0) {
+    usb_hid.keyboardReport(RID_KEYBOARD, 0, keys);
+    memcpy(lastKeyboardKeys, keys, sizeof(keys));
+  }
+}
+
+// CFG KEY accepts numeric HID keyboard usage codes.
+// Examples:
+// CFG KEY 1 20   -> Button 1 sends Q
+// CFG KEY 1 44   -> Button 1 sends Space
+// CFG KEY 1 0    -> Button 1 sends no key and remains joystick output
+uint8_t parseKeyCode(const char *s)
+{
+  if (!s) return HID_KEY_NONE;
+
+  if (strcmp(s, "OFF") == 0) return HID_KEY_NONE;
+  if (strcmp(s, "NONE") == 0) return HID_KEY_NONE;
+
+  char *end = nullptr;
+  long value = strtol(s, &end, 10);
+
+  if (end != s && *end == '\0' && value >= 0 && value <= 255) {
+    return (uint8_t)value;
+  }
+
+  // Optional text aliases for manual serial use.
+  if (strlen(s) == 1) {
+    char c = s[0];
+
+    if (c >= 'a' && c <= 'z') return HID_KEY_A + (c - 'a');
+    if (c >= 'A' && c <= 'Z') return HID_KEY_A + (c - 'A');
+    if (c >= '1' && c <= '9') return HID_KEY_1 + (c - '1');
+    if (c == '0') return HID_KEY_0;
+  }
+
+  if (strcmp(s, "SPACE") == 0) return HID_KEY_SPACE;
+  if (strcmp(s, "ENTER") == 0) return HID_KEY_END;
+  if (strcmp(s, "ESC") == 0) return HID_KEY_ESCAPE;
+  if (strcmp(s, "ESCAPE") == 0) return HID_KEY_ESCAPE;
+  if (strcmp(s, "TAB") == 0) return HID_KEY_TAB;
+  if (strcmp(s, "BACKSPACE") == 0) return HID_KEY_BACKSPACE;
+  if (strcmp(s, "UP") == 0) return HID_KEY_ARROW_UP;
+  if (strcmp(s, "DOWN") == 0) return HID_KEY_ARROW_DOWN;
+  if (strcmp(s, "LEFT") == 0) return HID_KEY_ARROW_LEFT;
+  if (strcmp(s, "RIGHT") == 0) return HID_KEY_ARROW_RIGHT;
+
+  return HID_KEY_NONE;
+}
+
+void printKeyName(uint8_t key)
+{
+  if (key == HID_KEY_NONE) {
+    Serial.print("OFF");
+  } else if (key >= HID_KEY_A && key <= HID_KEY_Z) {
+    Serial.print((char)('A' + key - HID_KEY_A));
+  } else if (key >= HID_KEY_1 && key <= HID_KEY_9) {
+    Serial.print((char)('1' + key - HID_KEY_1));
+  } else if (key == HID_KEY_0) {
+    Serial.print("0");
+  } else if (key == HID_KEY_SPACE) {
+    Serial.print("SPACE");
+  } else if (key == HID_KEY_ESCAPE) {
+    Serial.print("ESC");
+  } else if (key == HID_KEY_TAB) {
+    Serial.print("TAB");
+  } else if (key == HID_KEY_BACKSPACE) {
+    Serial.print("BACKSPACE");
+  } else if (key == HID_KEY_ARROW_UP) {
+    Serial.print("UP");
+  } else if (key == HID_KEY_ARROW_DOWN) {
+    Serial.print("DOWN");
+  } else if (key == HID_KEY_ARROW_LEFT) {
+    Serial.print("LEFT");
+  } else if (key == HID_KEY_ARROW_RIGHT) {
+    Serial.print("RIGHT");
+  } else {
+    Serial.print(key);
   }
 }
 
@@ -385,9 +507,12 @@ void setup()
   memset(rawCh, 0, sizeof(rawCh));
   memset(hidAxis, 0, sizeof(hidAxis));
   memset(&gp, 0, sizeof(gp));
+  memset(lastKeyboardKeys, 0, sizeof(lastKeyboardKeys));
+  logicalButtons = 0;
 
   loadConfig();
 
+  USBDevice.setProductDescriptor("USB EspressLRS");
   usb_hid.setPollInterval(2);
   usb_hid.setReportDescriptor(desc_hid_report, sizeof(desc_hid_report));
   usb_hid.begin();
@@ -423,7 +548,13 @@ void loop()
 
   if (datardyf) {
     if (usb_hid.ready()) {
-      usb_hid.sendReport(0, &gp, sizeof(gp));
+      usb_hid.sendReport(RID_GAMEPAD, &gp, sizeof(gp));
+    }
+
+    delay(2);
+
+    if (usb_hid.ready()) {
+      sendKeyboardFromButtons(logicalButtons);
     }
 
     datardyf = false;
@@ -764,11 +895,34 @@ void processCfgCommand(char *line)
     return;
   }
 
+  if (strcmp(cmd, "KEY") == 0) {
+    char *btnStr = strtok(NULL, " \t\r\n");
+    char *keyStr = strtok(NULL, " \t\r\n");
+
+    if (!btnStr || !keyStr) {
+      Serial.println("ERR key_args");
+      return;
+    }
+
+    int btn = atoi(btnStr) - 1;
+
+    if (btn < 0 || btn >= 16) {
+      Serial.println("ERR btn_range");
+      return;
+    }
+
+    config.key[btn] = parseKeyCode(keyStr);
+
+    Serial.println("OK KEY");
+    return;
+  }
+
   if (strcmp(cmd, "BTNCLR") == 0) {
     for (uint8_t i = 0; i < 16; i++) {
       config.button[i].enabled = 0;
       config.button[i].channel = 0;
       config.button[i].position = BTN_OFF;
+      config.key[i] = HID_KEY_NONE;
     }
 
     Serial.println("OK BTNCLR");
@@ -825,6 +979,22 @@ void printConfig()
   }
   Serial.print("]");
 
+  Serial.print(",\"keys\":[");
+  for (uint8_t i = 0; i < 16; i++) {
+    if (i) Serial.print(",");
+    Serial.print(config.key[i]);
+  }
+  Serial.print("]");
+
+  Serial.print(",\"keyNames\":[");
+  for (uint8_t i = 0; i < 16; i++) {
+    if (i) Serial.print(",");
+    Serial.print("\"");
+    printKeyName(config.key[i]);
+    Serial.print("\"");
+  }
+  Serial.print("]");
+
   Serial.print(",\"calibrating\":");
   Serial.print(calibrating ? 1 : 0);
   Serial.println("}");
@@ -849,7 +1019,12 @@ void printData()
   }
   Serial.print("]");
 
+  // Logical buttons are used for the UI, so key-mapped buttons remain visible.
   Serial.print(",\"buttons\":");
+  Serial.print(logicalButtons);
+
+  // Actual joystick buttons sent in the gamepad report after keyboard filtering.
+  Serial.print(",\"joystickButtons\":");
   Serial.print(gp.buttons);
 
   Serial.print(",\"calibrating\":");
